@@ -476,45 +476,81 @@ export function PunchScreen({ onOpenProfile }) {
 function KuralCard() {
   const kural = getTodaysKural()
   const [expanded, setExpanded] = useState(false)
+  const [lang, setLang] = useState('tamil') // 'tamil' | 'english'
 
   return (
-    <div
-      className="bg-gradient-to-br from-brand-700 to-brand-900 rounded-2xl px-4 py-4 shadow-md"
-      onClick={() => setExpanded(e => !e)}
-    >
-      <div className="flex items-center justify-between mb-2">
+    <div className="bg-gradient-to-br from-brand-700 to-brand-900 rounded-2xl px-4 py-4 shadow-md">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-brand-300 text-base">📖</span>
+          <span className="text-lg">📖</span>
           <p className="text-brand-200 text-[11px] font-semibold uppercase tracking-widest">
             Thirukkural of the Day
           </p>
         </div>
-        <span className="text-brand-400 text-[11px] font-medium bg-brand-800/50 px-2 py-0.5 rounded-full">
+        <span className="text-brand-300 text-[11px] font-semibold bg-white/10 px-2 py-0.5 rounded-full">
           #{kural.number}
         </span>
       </div>
 
-      {/* Tamil verse */}
-      <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line"
-        style={{ fontFamily: 'serif' }}>
-        {kural.tamil}
-      </p>
+      {/* Tamil verse — tappable to expand */}
+      <button
+        className="w-full text-left"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line"
+          style={{ fontFamily: 'serif' }}>
+          {kural.tamil}
+        </p>
+        <p className="text-brand-400 text-[10px] mt-1.5">
+          {expanded ? '▲ Hide meaning' : '▼ Show meaning'}
+        </p>
+      </button>
 
-      {/* Transliteration + English meaning — show/hide on tap */}
+      {/* Meaning section */}
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-brand-600/50 animate-slide-up flex flex-col gap-1.5">
-          <p className="text-brand-300 text-[11px] font-medium leading-relaxed tracking-wide">
-            {kural.transliteration}
-          </p>
-          <p className="text-brand-100 text-xs leading-relaxed italic">
-            "{kural.english}"
-          </p>
+        <div className="mt-3 pt-3 border-t border-white/10 animate-slide-up">
+
+          {/* Tamil / English toggle */}
+          <div className="flex bg-white/10 rounded-xl p-0.5 mb-3 w-fit">
+            <button
+              onClick={() => setLang('tamil')}
+              className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all ${
+                lang === 'tamil'
+                  ? 'bg-white text-brand-700 shadow-sm'
+                  : 'text-brand-300'
+              }`}
+            >
+              தமிழ்
+            </button>
+            <button
+              onClick={() => setLang('english')}
+              className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all ${
+                lang === 'english'
+                  ? 'bg-white text-brand-700 shadow-sm'
+                  : 'text-brand-300'
+              }`}
+            >
+              English
+            </button>
+          </div>
+
+          {lang === 'tamil' ? (
+            <p className="text-brand-100 text-sm leading-relaxed">
+              {kural.tamilMeaning}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-brand-300 text-[11px] tracking-wide">
+                {kural.transliteration}
+              </p>
+              <p className="text-brand-100 text-sm leading-relaxed italic">
+                "{kural.english}"
+              </p>
+            </div>
+          )}
         </div>
       )}
-
-      <p className="text-brand-500 text-[10px] mt-2 text-right">
-        {expanded ? 'Tap to hide' : 'Tap to see meaning'}
-      </p>
     </div>
   )
 }
