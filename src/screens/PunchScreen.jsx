@@ -6,11 +6,13 @@ import { usePunchReminder } from '../hooks/usePunchReminder.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { getAttendance, postAttendance } from '../api/client.js'
 import { computeWorked, findTodayRecord } from '../utils/attendance.js'
-import { formatDuration, formatDisplayDate, formatDisplayTime } from '../utils/date.js'
-import { Alert } from '../components/ui/Alert.jsx'
+import { formatDuration, formatDisplayDate } from '../utils/date.js'
+import { getTodaysKural } from '../data/thirukkural.js'
 import {
-  OFFICE_LAT, OFFICE_LNG, GEOFENCE_RADIUS_M, ACCURACY_THRESHOLD_M, distanceMeters,
+  OFFICE_LAT, OFFICE_LNG, GEOFENCE_RADIUS_M, distanceMeters,
 } from '../config.js'
+
+const WORKDAY_MS = 9 * 60 * 60 * 1000 // 9-hour target
 
 const STATE = {
   IDLE: 'idle',
@@ -270,25 +272,49 @@ export function PunchScreen({ onOpenProfile }) {
       </header>
 
       {/* ── Body ── */}
-      <div className="flex-1 scroll-area px-4 py-4 flex flex-col gap-3">
+      <div className="flex-1 scroll-area px-4 py-3 flex flex-col gap-3 pb-safe">
 
-        {/* Status + Working hours */}
+        {/* Status + Working hours + progress */}
         <div className="flex gap-3">
+          {/* Status */}
           <div className="flex-1 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-            <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Status</p>
-            <div className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${isPunchedIn ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
+            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Status</p>
+            <div className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1
+              ${isPunchedIn ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+              <span className={`w-2 h-2 rounded-full flex-shrink-0
+                ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
               {isPunchedIn ? 'In Office' : 'Not Clocked In'}
             </div>
           </div>
+          {/* Working hours + progress bar */}
           <div className="flex-1 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-            <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Working Hours</p>
+            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Working Hours</p>
             {isLoading
               ? <SpinnerIcon className="h-5 w-5 text-brand-400 mt-1" />
-              : <p className="text-xl font-bold text-brand-700 tabular-nums">{formatDuration(totalMs)}</p>
+              : <>
+                  <p className="text-lg font-bold text-brand-700 tabular-nums leading-none">
+                    {formatDuration(totalMs)}
+                  </p>
+                  {/* Progress bar toward 9h target */}
+                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, (totalMs / WORKDAY_MS) * 100).toFixed(1)}%`,
+                        background: totalMs >= WORKDAY_MS ? '#16a34a' : '#4ade80',
+                      }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-300 mt-1 tabular-nums">
+                    {totalMs >= WORKDAY_MS ? '✓ Target reached' : `${formatDuration(Math.max(0, WORKDAY_MS - totalMs))} left`}
+                  </p>
+                </>
             }
           </div>
         </div>
+
+        {/* Thirukkural of the day */}
+        <KuralCard />
 
         {/* Success banner */}
         {isSuccess && (
@@ -401,24 +427,31 @@ export function PunchScreen({ onOpenProfile }) {
           </p>
         </div>
 
-        {/* Today's activity */}
+        {/* Today's activity — fixed height, scrolls inside card only */}
         {sortedEvents.length > 0 && (
-          <div className="bg-white rounded-2xl px-4 py-4 shadow-sm">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">
-              Today's Activity
-            </p>
-            <div className="flex flex-col divide-y divide-gray-50">
+          <div className="bg-white rounded-2xl px-4 pt-4 pb-2 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                Today's Activity
+              </p>
+              <span className="text-[11px] font-semibold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">
+                {sortedEvents.length} {sortedEvents.length === 1 ? 'entry' : 'entries'}
+              </span>
+            </div>
+            {/* Max 3 rows visible — scrolls inside */}
+            <div className="overflow-y-auto divide-y divide-gray-50" style={{ maxHeight: '11rem' }}>
               {sortedEvents.map((ev, i) => {
-                const isIn = ev.check === 'in'
+                const evIn = ev.check === 'in'
                 return (
-                  <div key={ev._id || i} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${isIn ? 'bg-brand-50' : 'bg-rose-50'}`}>
-                      <span className={`w-2.5 h-2.5 rounded-full ${isIn ? 'bg-brand-500' : 'bg-rose-400'}`} />
+                  <div key={ev._id || i} className="flex items-center gap-3 py-2.5 first:pt-0">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0
+                      ${evIn ? 'bg-brand-50' : 'bg-rose-50'}`}>
+                      <span className={`w-2.5 h-2.5 rounded-full ${evIn ? 'bg-brand-500' : 'bg-rose-400'}`} />
                     </div>
-                    <p className={`flex-1 text-sm font-semibold ${isIn ? 'text-brand-700' : 'text-rose-500'}`}>
-                      Punch {isIn ? 'In' : 'Out'}
+                    <p className={`flex-1 text-sm font-semibold ${evIn ? 'text-brand-700' : 'text-rose-500'}`}>
+                      Punch {evIn ? 'In' : 'Out'}
                     </p>
-                    <p className="text-sm font-medium text-gray-500 tabular-nums">
+                    <p className="text-sm font-medium text-gray-400 tabular-nums">
                       {new Date(ev.timestamp).toLocaleTimeString('en-IN', {
                         hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata',
                       })}
@@ -427,9 +460,61 @@ export function PunchScreen({ onOpenProfile }) {
                 )
               })}
             </div>
+            {sortedEvents.length > 3 && (
+              <p className="text-center text-[10px] text-gray-300 py-2">
+                ↑ scroll to see all
+              </p>
+            )}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ── Thirukkural card ──────────────────────────────────────────────────────
+function KuralCard() {
+  const kural = getTodaysKural()
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div
+      className="bg-gradient-to-br from-brand-700 to-brand-900 rounded-2xl px-4 py-4 shadow-md"
+      onClick={() => setExpanded(e => !e)}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-brand-300 text-base">📖</span>
+          <p className="text-brand-200 text-[11px] font-semibold uppercase tracking-widest">
+            Thirukkural of the Day
+          </p>
+        </div>
+        <span className="text-brand-400 text-[11px] font-medium bg-brand-800/50 px-2 py-0.5 rounded-full">
+          #{kural.number}
+        </span>
+      </div>
+
+      {/* Tamil verse */}
+      <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line"
+        style={{ fontFamily: 'serif' }}>
+        {kural.tamil}
+      </p>
+
+      {/* Transliteration + English meaning — show/hide on tap */}
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-brand-600/50 animate-slide-up flex flex-col gap-1.5">
+          <p className="text-brand-300 text-[11px] font-medium leading-relaxed tracking-wide">
+            {kural.transliteration}
+          </p>
+          <p className="text-brand-100 text-xs leading-relaxed italic">
+            "{kural.english}"
+          </p>
+        </div>
+      )}
+
+      <p className="text-brand-500 text-[10px] mt-2 text-right">
+        {expanded ? 'Tap to hide' : 'Tap to see meaning'}
+      </p>
     </div>
   )
 }
