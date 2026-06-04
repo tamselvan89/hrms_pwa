@@ -292,41 +292,32 @@ export function PunchScreen({ onOpenProfile }) {
           </div>
         )}
 
-        {/* Bottom padding so last card isn't hidden behind punch panel */}
         <div className="h-2 flex-shrink-0" />
       </div>
 
-      {/* ── PUNCH PANEL — always visible, pinned at bottom ── */}
-      <div className="flex-shrink-0 bg-white border-t border-gray-100 px-4 pt-4 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+      {/* ── PUNCH PANEL — compact, pinned at bottom ── */}
+      <div className="flex-shrink-0 bg-white border-t border-gray-100 px-4 pt-3 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
 
-        {/* Status + hours + progress */}
-        <div className="flex items-center justify-between mb-3">
-          <div className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-3 py-1.5
+        {/* Single row: status + progress bar + hours */}
+        <div className="flex items-center gap-2 mb-2">
+          <div className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-1 flex-shrink-0
             ${isPunchedIn ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
+            <span className={`w-1.5 h-1.5 rounded-full ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
             {isPunchedIn ? 'In Office' : 'Not Clocked In'}
           </div>
-          <div className="text-right">
-            {isLoading
-              ? <SpinnerIcon className="h-4 w-4 text-brand-400" />
-              : <div className="flex items-center gap-2">
-                  <p className="text-xs text-gray-400">{progressPct >= 100 ? '✓ Target' : `${Math.round(progressPct)}%`}</p>
-                  <p className="text-base font-bold text-brand-700 tabular-nums">{formatDuration(totalMs)}</p>
-                </div>
-            }
-          </div>
+          {!isLoading && (
+            <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-700"
+                style={{ width: `${progressPct.toFixed(1)}%`, background: progressPct >= 100 ? '#16a34a' : '#4ade80' }} />
+            </div>
+          )}
+          <p className="text-sm font-bold text-brand-700 tabular-nums flex-shrink-0">
+            {isLoading ? '…' : formatDuration(totalMs)}
+          </p>
         </div>
 
-        {/* Progress bar */}
-        {!isLoading && (
-          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-3">
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${progressPct.toFixed(1)}%`, background: progressPct >= 100 ? '#16a34a' : '#4ade80' }} />
-          </div>
-        )}
-
         {/* Punch button */}
-        <div className="relative mb-2">
+        <div className="relative">
           {isLocating && (
             <span className="absolute inset-0 rounded-2xl animate-sonar opacity-30 pointer-events-none"
               style={{ background: punchColor.glow }} />
@@ -335,7 +326,7 @@ export function PunchScreen({ onOpenProfile }) {
             key={punchState}
             onClick={handlePunch}
             disabled={isButtonBusy || isLoading}
-            className={`w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-3
+            className={`w-full py-3.5 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-3
               disabled:opacity-60 disabled:cursor-not-allowed select-none transition-all duration-200 relative overflow-hidden
               ${isSuccess ? 'animate-pop' : ''}
               ${!isButtonBusy && !isSuccess ? 'active:scale-[0.98]' : ''}`}
@@ -365,13 +356,6 @@ export function PunchScreen({ onOpenProfile }) {
             )}
           </button>
         </div>
-
-        <p className="text-center text-[10px] text-gray-300 flex items-center justify-center gap-1 pb-1">
-          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-          </svg>
-          Location verified on each punch
-        </p>
       </div>
     </div>
   )
