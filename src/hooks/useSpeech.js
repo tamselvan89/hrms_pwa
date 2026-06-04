@@ -9,7 +9,7 @@ export function useSpeech() {
 
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
-    setIsSupported(true)
+    setIsSupported(true) // mark supported immediately — don't wait for voices
 
     function loadVoices() {
       const v = window.speechSynthesis.getVoices()
