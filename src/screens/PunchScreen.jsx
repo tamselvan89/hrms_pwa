@@ -12,14 +12,8 @@ import {
   OFFICE_LAT, OFFICE_LNG, GEOFENCE_RADIUS_M, distanceMeters,
 } from '../config.js'
 
-const WORKDAY_MS = 9 * 60 * 60 * 1000 // 9-hour target
-
-const STATE = {
-  IDLE: 'idle',
-  LOCATING: 'locating',
-  SUBMITTING: 'submitting',
-  SUCCESS: 'success',
-}
+const STATE = { IDLE: 'idle', LOCATING: 'locating', SUBMITTING: 'submitting', SUCCESS: 'success' }
+const WORKDAY_MS = 9 * 60 * 60 * 1000
 
 function SpinnerIcon({ className = 'h-5 w-5' }) {
   return (
@@ -28,6 +22,15 @@ function SpinnerIcon({ className = 'h-5 w-5' }) {
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
     </svg>
   )
+}
+
+// ── Greeting based on time of day ──────────────────────────────────────────
+function getGreeting() {
+  const hour = new Date().toLocaleString('en-IN', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' })
+  const h = parseInt(hour)
+  if (h < 12) return 'Good Morning'
+  if (h < 17) return 'Good Afternoon'
+  return 'Good Evening'
 }
 
 export function PunchScreen({ onOpenProfile }) {
@@ -40,7 +43,6 @@ export function PunchScreen({ onOpenProfile }) {
   const [isLoading, setIsLoading] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef(null)
-  // Capture which action was just completed so SUCCESS state shows the right label/color
   const lastPunchedAction = useRef(null)
 
   useEffect(() => {
@@ -62,30 +64,27 @@ export function PunchScreen({ onOpenProfile }) {
       const res = await getAttendance(profile.uid)
       const todayRecord = findTodayRecord(res.data || [])
       setEvents(todayRecord?.events || [])
-    } catch { /* silent */ }
+    } catch { }
     finally { setIsLoading(false) }
   }, [profile?.uid])
 
   useEffect(() => { loadAttendance() }, [loadAttendance])
 
   const { totalMs, isPunchedIn, nextAction } = computeWorked(events, now)
+  const { deferredPrompt, isStandalone, promptInstall } = useInstallPrompt()
+  usePunchReminder(isPunchedIn)
 
   async function submitPunch() {
-    // Snapshot the action NOW before events update flips nextAction
     const action = nextAction
     lastPunchedAction.current = action
     setPunchState(STATE.SUBMITTING)
     try {
       const res = await postAttendance({ check: action })
       const doc = res.data?._doc || res.data
-      // Update events AFTER capturing the action — nextAction will flip here
       if (doc?.events) setEvents(doc.events)
       else await loadAttendance()
       setPunchState(STATE.SUCCESS)
-      setTimeout(() => {
-        setPunchState(STATE.IDLE)
-        setAlertMsg(null)
-      }, 3000)
+      setTimeout(() => { setPunchState(STATE.IDLE); setAlertMsg(null) }, 3000)
     } catch (err) {
       setPunchState(STATE.IDLE)
       setAlertMsg({ type: 'error', message: err.message || 'Punch failed. Please try again.' })
@@ -95,235 +94,218 @@ export function PunchScreen({ onOpenProfile }) {
   async function handlePunch() {
     setAlertMsg(null)
     setPunchState(STATE.LOCATING)
-
     if (!navigator.geolocation) {
-      setAlertMsg({ type: 'error', message: 'Geolocation is not supported by your browser.' })
-      setPunchState(STATE.IDLE)
-      return
+      setAlertMsg({ type: 'error', message: 'Geolocation not supported.' })
+      setPunchState(STATE.IDLE); return
     }
-
-    // Collect positions for up to MAX_WAIT_MS, keep the most accurate one seen.
-    // On desktop WiFi/IP location fires once with poor accuracy and never improves —
-    // we take the best we have rather than waiting forever.
     const MAX_WAIT_MS = 10000
-    let bestPosition = null
-    let settled = false
-
+    let bestPosition = null, settled = false
     const position = await new Promise((resolve) => {
       let watchId = null
-
       function finish(pos) {
-        if (settled) return
-        settled = true
+        if (settled) return; settled = true
         if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null }
         resolve(pos)
       }
-
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
-          // Keep improving if a better fix arrives
-          if (!bestPosition || pos.coords.accuracy < bestPosition.coords.accuracy) {
-            bestPosition = pos
-          }
-          // Good enough — stop waiting
-          if (pos.coords.accuracy <= ACCURACY_THRESHOLD_M) {
-            finish(pos)
-          }
+          if (!bestPosition || pos.coords.accuracy < bestPosition.coords.accuracy) bestPosition = pos
+          if (pos.coords.accuracy <= 200) finish(pos)
         },
-        (err) => {
-          if (err.code === 1) {
-            // Permission denied — no point waiting
-            finish(null)
-          }
-          // For other errors (unavailable/timeout) keep waiting; best effort
-        },
+        (err) => { if (err.code === 1) finish(null) },
         { enableHighAccuracy: true, timeout: MAX_WAIT_MS, maximumAge: 0 }
       )
-
-      // Deadline — use whatever best position we have
-      setTimeout(() => {
-        if (!settled) finish(bestPosition)
-      }, MAX_WAIT_MS)
+      setTimeout(() => { if (!settled) finish(bestPosition) }, MAX_WAIT_MS)
     })
-
-    // Permission denied
     if (!position && !bestPosition) {
       setPunchState(STATE.IDLE)
-      setAlertMsg({ type: 'error', message: 'Location access denied. Enable location in your settings and try again.' })
-      return
+      setAlertMsg({ type: 'error', message: 'Location access denied. Enable location and try again.' }); return
     }
-
     const pos = position || bestPosition
     const { latitude, longitude, accuracy } = pos.coords
     const distance = distanceMeters(latitude, longitude, OFFICE_LAT, OFFICE_LNG)
-
     console.info(`[geofence] lat:${latitude.toFixed(5)} lng:${longitude.toFixed(5)} | accuracy:${Math.round(accuracy)}m | distance:${Math.round(distance)}m | radius:${GEOFENCE_RADIUS_M}m`)
-
-    // Block if outside the geofence radius
     if (distance > GEOFENCE_RADIUS_M) {
-      const distLabel = distance >= 1000
-        ? `${(distance / 1000).toFixed(1)} km`
-        : `${Math.round(distance)} m`
+      const distLabel = distance >= 1000 ? `${(distance / 1000).toFixed(1)} km` : `${Math.round(distance)} m`
       setPunchState(STATE.IDLE)
-      setAlertMsg({
-        type: 'error',
-        // Show GPS coords in the error so we can verify/fix office coordinates
-        message: `${distLabel} from office.\nYour GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)\nOffice: ${OFFICE_LAT}, ${OFFICE_LNG}`,
-      })
-      return
+      setAlertMsg({ type: 'error', message: `You're not at the office. You are ${distLabel} away.\nYour GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)\nOffice: ${OFFICE_LAT}, ${OFFICE_LNG}` }); return
     }
-
     await submitPunch()
   }
 
-  const { deferredPrompt, isStandalone, promptInstall } = useInstallPrompt()
-
-  // Schedule / cancel 9 PM punch-out reminder whenever punch state changes
-  usePunchReminder(isPunchedIn)
   const isButtonBusy = punchState === STATE.LOCATING || punchState === STATE.SUBMITTING
-  const initials = [profile?.firstname?.[0], profile?.lastname?.[0]].filter(Boolean).join('')
-  const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-
   const isSuccess = punchState === STATE.SUCCESS
   const isLocating = punchState === STATE.LOCATING
-  const isSubmitting = punchState === STATE.SUBMITTING
+  const initials = [profile?.firstname?.[0], profile?.lastname?.[0]].filter(Boolean).join('')
+  const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  const progressPct = Math.min(100, (totalMs / WORKDAY_MS) * 100)
 
-  // During SUCCESS use the snapshotted action, not the already-flipped nextAction
-  const displayAction = isSuccess ? lastPunchedAction.current : nextAction
-  const isIn = displayAction === 'in'
-
-  const colors = isSuccess
-    ? (lastPunchedAction.current === 'in'
-        ? { bg: '#16a34a', ring: '#bbf7d0', label: 'Punched In!' }
-        : { bg: '#f43f5e', ring: '#fecdd3', label: 'Punched Out!' })
+  // Punch button config
+  const punchIsIn = isSuccess ? lastPunchedAction.current === 'in' : nextAction === 'in'
+  const punchColor = isSuccess
+    ? (lastPunchedAction.current === 'in' ? { from: '#16a34a', to: '#15803d', glow: '#bbf7d0' }
+      : { from: '#f43f5e', to: '#e11d48', glow: '#fecdd3' })
     : isButtonBusy
-      ? { bg: '#94a3b8', ring: '#e2e8f0', label: isLocating ? 'Locating…' : 'Recording…' }
+      ? { from: '#94a3b8', to: '#64748b', glow: '#e2e8f0' }
       : nextAction === 'in'
-        ? { bg: '#16a34a', ring: '#bbf7d0', label: 'Punch In' }
-        : { bg: '#f43f5e', ring: '#fecdd3', label: 'Punch Out' }
+        ? { from: '#16a34a', to: '#15803d', glow: '#bbf7d0' }
+        : { from: '#f43f5e', to: '#e11d48', glow: '#fecdd3' }
+
+  const punchLabel = isSuccess
+    ? (lastPunchedAction.current === 'in' ? 'Punched In!' : 'Punched Out!')
+    : isLocating ? 'Getting Location…'
+    : punchState === STATE.SUBMITTING ? 'Recording…'
+    : nextAction === 'in' ? 'Punch In' : 'Punch Out'
 
   return (
     <div className="h-screen-safe flex flex-col bg-gray-50">
 
-      {/* ── Header — extends into status bar ── */}
+      {/* ── Header ── */}
       <header className="bg-brand-600 pt-safe flex-shrink-0">
-        <div className="px-4 pt-3 pb-4 flex items-center justify-between">
-
-          {/* Left: logo + greeting */}
+        <div className="px-4 pt-3 pb-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-white flex items-center justify-center shadow-sm flex-shrink-0">
-              <img
-                src={logoMark}
-                alt="Netkathir"
-                className="h-7 w-7 object-contain"
-                draggable="false"
-              />
+            <div className="h-8 w-8 rounded-xl bg-white flex items-center justify-center flex-shrink-0">
+              <img src={logoMark} alt="NK" className="h-6 w-6 object-contain" draggable="false" />
             </div>
-            <h1 className="text-white text-[15px] font-bold leading-tight">
-              Hi, {profile?.firstname || 'there'} 👋
-            </h1>
+            <div>
+              <p className="text-brand-200 text-[10px] font-medium leading-none">{getGreeting()}</p>
+              <h1 className="text-white text-sm font-bold leading-tight">{profile?.firstname || 'there'} 👋</h1>
+            </div>
           </div>
-
-          {/* Right: avatar menu */}
           <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen(o => !o)}
-              className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center text-white font-bold text-sm tracking-wide"
-            >
-              {initials || '??'}
+            <button onClick={() => setMenuOpen(o => !o)}
+              className="w-9 h-9 rounded-full bg-white/20 border border-white/30 flex items-center justify-center text-white font-bold text-sm">
+              {initials || '?'}
             </button>
             {menuOpen && (
               <div className="absolute right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-gray-100 py-1 z-50 overflow-hidden">
                 <button onClick={() => { setMenuOpen(false); onOpenProfile() }}
-                  className="w-full text-left px-4 py-3 text-sm text-gray-700 font-medium active:bg-gray-50">
-                  My Profile
-                </button>
-                {/* Show Install option if prompt available and not already installed */}
+                  className="w-full text-left px-4 py-3 text-sm text-gray-700 font-medium active:bg-gray-50">My Profile</button>
                 {deferredPrompt && !isStandalone && (
-                  <>
-                    <div className="h-px bg-gray-100 mx-3" />
+                  <><div className="h-px bg-gray-100 mx-3" />
                     <button onClick={() => { setMenuOpen(false); promptInstall() }}
                       className="w-full text-left px-4 py-3 text-sm text-brand-600 font-semibold active:bg-brand-50 flex items-center gap-2">
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Install App
-                    </button>
+                      </svg>Install App</button>
                   </>
                 )}
                 <div className="h-px bg-gray-100 mx-3" />
                 <button onClick={() => { setMenuOpen(false); logout() }}
-                  className="w-full text-left px-4 py-3 text-sm text-rose-500 font-medium active:bg-rose-50">
-                  Logout
-                </button>
+                  className="w-full text-left px-4 py-3 text-sm text-rose-500 font-medium active:bg-rose-50">Logout</button>
               </div>
             )}
           </div>
         </div>
-
-        {/* Date + animated flip clock */}
-        <div className="px-4 pb-5">
-          <p className="text-brand-200 text-xs font-medium">{formatDisplayDate()}</p>
-          <FlipClock
-            date={new Date(now)}
-            className="text-white text-4xl font-bold tracking-tight mt-0.5"
-          />
+        <div className="px-4 pb-4">
+          <p className="text-brand-200 text-[10px] font-medium">{formatDisplayDate()}</p>
+          <FlipClock date={new Date(now)} className="text-white text-3xl font-bold tracking-tight mt-0.5" />
         </div>
       </header>
 
-      {/* ── Body ── */}
+      {/* ── Scrollable body ── */}
       <div className="flex-1 scroll-area px-4 py-3 flex flex-col gap-3 pb-safe">
 
-        {/* Status + Working hours + progress */}
-        <div className="flex gap-3">
-          {/* Status */}
-          <div className="flex-1 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Status</p>
-            <div className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1
-              ${isPunchedIn ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
-              <span className={`w-2 h-2 rounded-full flex-shrink-0
-                ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
-              {isPunchedIn ? 'In Office' : 'Not Clocked In'}
+        {/* ── PUNCH CARD — wide pill, not a giant circle ── */}
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          {/* Status bar at top */}
+          <div className={`h-1 w-full transition-all duration-500 ${isPunchedIn ? 'bg-brand-400' : 'bg-gray-200'}`} />
+
+          <div className="px-4 py-4">
+            {/* Top row: status + hours */}
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Status</p>
+                <div className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1
+                  ${isPunchedIn ? 'bg-brand-50 text-brand-700' : 'bg-gray-100 text-gray-500'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isPunchedIn ? 'bg-brand-500 animate-pulse' : 'bg-gray-300'}`} />
+                  {isPunchedIn ? 'In Office' : 'Not Clocked In'}
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-0.5">Today</p>
+                {isLoading
+                  ? <SpinnerIcon className="h-4 w-4 text-brand-400 ml-auto" />
+                  : <p className="text-lg font-bold text-brand-700 tabular-nums leading-none">{formatDuration(totalMs)}</p>
+                }
+              </div>
             </div>
-          </div>
-          {/* Working hours + progress bar */}
-          <div className="flex-1 bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-            <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">Working Hours</p>
-            {isLoading
-              ? <SpinnerIcon className="h-5 w-5 text-brand-400 mt-1" />
-              : <>
-                  <p className="text-lg font-bold text-brand-700 tabular-nums leading-none">
-                    {formatDuration(totalMs)}
-                  </p>
-                  {/* Progress bar toward 9h target */}
-                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${Math.min(100, (totalMs / WORKDAY_MS) * 100).toFixed(1)}%`,
-                        background: totalMs >= WORKDAY_MS ? '#16a34a' : '#4ade80',
-                      }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-gray-300 mt-1 tabular-nums">
-                    {totalMs >= WORKDAY_MS ? '✓ Target reached' : `${formatDuration(Math.max(0, WORKDAY_MS - totalMs))} left`}
-                  </p>
-                </>
-            }
+
+            {/* Progress bar */}
+            {!isLoading && (
+              <div className="mb-4">
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${progressPct.toFixed(1)}%`, background: progressPct >= 100 ? '#16a34a' : '#4ade80' }} />
+                </div>
+                <div className="flex justify-between mt-1">
+                  <p className="text-[10px] text-gray-300">{progressPct >= 100 ? '✓ 9h target reached' : `${formatDuration(Math.max(0, WORKDAY_MS - totalMs))} to 9h`}</p>
+                  <p className="text-[10px] text-gray-300">{Math.round(progressPct)}%</p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Punch button — wide pill ── */}
+            <div className="relative">
+              {/* Sonar rings while locating */}
+              {isLocating && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="absolute w-full h-14 rounded-2xl animate-sonar opacity-40"
+                    style={{ background: punchColor.glow }} />
+                </div>
+              )}
+              <button
+                key={punchState}
+                onClick={handlePunch}
+                disabled={isButtonBusy || isLoading}
+                className={`w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-center gap-3
+                  disabled:opacity-60 disabled:cursor-not-allowed select-none transition-all duration-200
+                  ${isSuccess ? 'animate-pop' : ''}
+                  ${!isButtonBusy && !isSuccess ? 'active:scale-[0.98]' : ''}`}
+                style={{
+                  background: `linear-gradient(135deg, ${punchColor.from}, ${punchColor.to})`,
+                  boxShadow: `0 4px 20px ${punchColor.glow}`,
+                }}
+              >
+                {isLocating || punchState === STATE.SUBMITTING
+                  ? <SpinnerIcon className="h-5 w-5" />
+                  : isSuccess
+                    ? <svg className="h-5 w-5 draw-check" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    : punchIsIn
+                      ? <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
+                        </svg>
+                      : <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+                        </svg>
+                }
+                <span key={punchLabel} className="animate-slide-up">{punchLabel}</span>
+                {/* Ripple on success */}
+                {isSuccess && (
+                  <span className="absolute inset-0 rounded-2xl animate-ripple pointer-events-none"
+                    style={{ background: punchColor.glow }} />
+                )}
+              </button>
+            </div>
+
+            <p className="text-center text-[10px] text-gray-300 mt-2 flex items-center justify-center gap-1">
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+              </svg>
+              Location verified on each punch
+            </p>
           </div>
         </div>
 
-        {/* Thirukkural of the day */}
-        <KuralCard />
-
         {/* Success banner */}
         {isSuccess && (
-          <div className={`rounded-2xl px-4 py-3.5 flex items-center gap-3 animate-slide-up
+          <div className={`rounded-2xl px-4 py-3 flex items-center gap-3 animate-slide-up
             ${lastPunchedAction.current === 'in' ? 'bg-brand-50 border border-brand-200' : 'bg-rose-50 border border-rose-200'}`}>
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0
               ${lastPunchedAction.current === 'in' ? 'bg-brand-600' : 'bg-rose-500'}`}>
-              <svg className="h-5 w-5 draw-check" viewBox="0 0 24 24" fill="none"
-                stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg className="h-4 w-4 draw-check" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 13l4 4L19 7" />
               </svg>
             </div>
@@ -339,8 +321,8 @@ export function PunchScreen({ onOpenProfile }) {
         )}
 
         {/* Error banner */}
-        {alertMsg && alertMsg.type === 'error' && (
-          <div className="rounded-2xl px-4 py-3.5 bg-red-50 border border-red-200 animate-slide-up">
+        {alertMsg?.type === 'error' && (
+          <div className="rounded-2xl px-4 py-3 bg-red-50 border border-red-200 animate-slide-up">
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
@@ -362,91 +344,29 @@ export function PunchScreen({ onOpenProfile }) {
           </div>
         )}
 
-        {/* ── Animated punch button ── */}
-        <div className="flex flex-col items-center gap-3 py-2">
-          <div className="relative flex items-center justify-center">
+        {/* ── Quick stats row ── */}
+        <QuickStats events={sortedEvents} totalMs={totalMs} isPunchedIn={isPunchedIn} />
 
-            {/* Sonar rings while locating */}
-            {isLocating && (
-              <>
-                <span className="absolute w-44 h-44 rounded-full animate-sonar"
-                  style={{ background: colors.ring }} />
-                <span className="absolute w-44 h-44 rounded-full animate-sonar"
-                  style={{ background: colors.ring, animationDelay: '0.5s' }} />
-              </>
-            )}
+        {/* ── Thirukkural ── */}
+        <KuralCard />
 
-            {/* Success outer ring pop */}
-            {isSuccess && (
-              <span className="absolute w-44 h-44 rounded-full animate-ripple"
-                style={{ background: colors.ring }} />
-            )}
-
-            {/* Main circle button */}
-            <button
-              key={punchState}
-              onClick={handlePunch}
-              disabled={isButtonBusy || isLoading}
-              className={`relative z-10 w-36 h-36 rounded-full text-white flex flex-col items-center justify-center
-                gap-1 shadow-2xl disabled:cursor-not-allowed select-none
-                ${isSuccess ? 'animate-pop' : ''}
-                ${!isButtonBusy && !isSuccess ? 'active:scale-95' : ''}
-                transition-all duration-200`}
-              style={{ background: colors.bg, boxShadow: `0 8px 32px ${colors.ring}` }}
-            >
-              {/* Icon */}
-              <span className="transition-all duration-200">
-                {isLocating || isSubmitting
-                  ? <SpinnerIcon className="h-9 w-9" />
-                  : isSuccess
-                    ? <svg className="h-10 w-10 draw-check" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M5 13l4 4L19 7" />
-                      </svg>
-                    : isIn
-                      ? <svg className="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" />
-                        </svg>
-                      : <svg className="h-9 w-9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
-                        </svg>
-                }
-              </span>
-
-              {/* Label */}
-              <span key={colors.label} className="text-sm font-bold tracking-wide animate-slide-up">
-                {colors.label}
-              </span>
-            </button>
-          </div>
-
-          <p className="text-xs text-gray-400 flex items-center gap-1">
-            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-            </svg>
-            Location verified on each punch
-          </p>
-        </div>
-
-        {/* Today's activity — fixed height, scrolls inside card only */}
+        {/* ── Today's activity ── */}
         {sortedEvents.length > 0 && (
           <div className="bg-white rounded-2xl px-4 pt-4 pb-2 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-                Today's Activity
-              </p>
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Today's Activity</p>
               <span className="text-[11px] font-semibold text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">
                 {sortedEvents.length} {sortedEvents.length === 1 ? 'entry' : 'entries'}
               </span>
             </div>
-            {/* Max 3 rows visible — scrolls inside */}
             <div className="overflow-y-auto divide-y divide-gray-50" style={{ maxHeight: '11rem' }}>
               {sortedEvents.map((ev, i) => {
                 const evIn = ev.check === 'in'
                 return (
                   <div key={ev._id || i} className="flex items-center gap-3 py-2.5 first:pt-0">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0
                       ${evIn ? 'bg-brand-50' : 'bg-rose-50'}`}>
-                      <span className={`w-2.5 h-2.5 rounded-full ${evIn ? 'bg-brand-500' : 'bg-rose-400'}`} />
+                      <span className={`w-2 h-2 rounded-full ${evIn ? 'bg-brand-500' : 'bg-rose-400'}`} />
                     </div>
                     <p className={`flex-1 text-sm font-semibold ${evIn ? 'text-brand-700' : 'text-rose-500'}`}>
                       Punch {evIn ? 'In' : 'Out'}
@@ -461,9 +381,7 @@ export function PunchScreen({ onOpenProfile }) {
               })}
             </div>
             {sortedEvents.length > 3 && (
-              <p className="text-center text-[10px] text-gray-300 py-2">
-                ↑ scroll to see all
-              </p>
+              <p className="text-center text-[10px] text-gray-300 py-2">↑ scroll to see all</p>
             )}
           </div>
         )}
@@ -472,15 +390,57 @@ export function PunchScreen({ onOpenProfile }) {
   )
 }
 
+// ── Quick stats ───────────────────────────────────────────────────────────
+function QuickStats({ events, totalMs, isPunchedIn }) {
+  // First punch-in time today
+  const firstIn = events.find(e => e.check === 'in')
+  const firstInTime = firstIn
+    ? new Date(firstIn.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
+    : '--'
+
+  // Number of breaks (out→in pairs after first in)
+  const breaks = events.filter(e => e.check === 'out').length
+
+  // On-time status — before 9:30 AM IST = on time
+  let onTimeLabel = '--'
+  let onTimeColor = 'text-gray-400'
+  if (firstIn) {
+    const d = new Date(firstIn.timestamp)
+    const istHour = parseInt(d.toLocaleString('en-IN', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }))
+    const istMin = d.toLocaleString('en-IN', { minute: 'numeric', timeZone: 'Asia/Kolkata' })
+    const totalMin = istHour * 60 + parseInt(istMin)
+    if (totalMin <= 9 * 60) { onTimeLabel = 'On Time'; onTimeColor = 'text-brand-600' }
+    else if (totalMin <= 10 * 60 + 30) { onTimeLabel = 'Late'; onTimeColor = 'text-amber-500' }
+    else { onTimeLabel = 'Very Late'; onTimeColor = 'text-rose-500' }
+  }
+
+  const stats = [
+    { label: 'First In', value: firstInTime, icon: '🕘' },
+    { label: 'Breaks', value: breaks === 0 ? 'None' : `${breaks}`, icon: '☕' },
+    { label: 'Arrival', value: onTimeLabel, icon: '📍', valueClass: onTimeColor },
+  ]
+
+  return (
+    <div className="flex gap-2">
+      {stats.map(s => (
+        <div key={s.label} className="flex-1 bg-white rounded-2xl px-3 py-3 shadow-sm text-center">
+          <p className="text-base mb-1">{s.icon}</p>
+          <p className={`text-xs font-bold tabular-nums ${s.valueClass || 'text-gray-700'}`}>{s.value}</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">{s.label}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Thirukkural card ──────────────────────────────────────────────────────
 function KuralCard() {
   const kural = getTodaysKural()
   const [expanded, setExpanded] = useState(false)
-  const [lang, setLang] = useState('tamil') // 'tamil' | 'english'
+  const [lang, setLang] = useState('tamil')
 
   return (
     <div className="bg-gradient-to-br from-brand-700 to-brand-900 rounded-2xl px-4 py-4 shadow-md">
-      {/* Header row */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-lg">📖</span>
@@ -493,13 +453,8 @@ function KuralCard() {
         </span>
       </div>
 
-      {/* Tamil verse — tappable to expand */}
-      <button
-        className="w-full text-left"
-        onClick={() => setExpanded(e => !e)}
-      >
-        <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line"
-          style={{ fontFamily: 'serif' }}>
+      <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
+        <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line" style={{ fontFamily: 'serif' }}>
           {kural.tamil}
         </p>
         <p className="text-brand-400 text-[10px] mt-1.5">
@@ -507,48 +462,24 @@ function KuralCard() {
         </p>
       </button>
 
-      {/* Meaning section */}
       {expanded && (
         <div className="mt-3 pt-3 border-t border-white/10 animate-slide-up">
-
-          {/* Tamil / English toggle */}
           <div className="flex bg-white/10 rounded-xl p-0.5 mb-3 w-fit">
-            <button
-              onClick={() => setLang('tamil')}
-              className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all ${
-                lang === 'tamil'
-                  ? 'bg-white text-brand-700 shadow-sm'
-                  : 'text-brand-300'
-              }`}
-            >
-              தமிழ்
-            </button>
-            <button
-              onClick={() => setLang('english')}
-              className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all ${
-                lang === 'english'
-                  ? 'bg-white text-brand-700 shadow-sm'
-                  : 'text-brand-300'
-              }`}
-            >
-              English
-            </button>
+            {['tamil', 'english'].map(l => (
+              <button key={l} onClick={() => setLang(l)}
+                className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
+                  ${lang === l ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-300'}`}>
+                {l === 'tamil' ? 'தமிழ்' : 'English'}
+              </button>
+            ))}
           </div>
-
-          {lang === 'tamil' ? (
-            <p className="text-brand-100 text-sm leading-relaxed">
-              {kural.tamilMeaning}
-            </p>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-brand-300 text-[11px] tracking-wide">
-                {kural.transliteration}
-              </p>
-              <p className="text-brand-100 text-sm leading-relaxed italic">
-                "{kural.english}"
-              </p>
-            </div>
-          )}
+          {lang === 'tamil'
+            ? <p className="text-brand-100 text-sm leading-relaxed">{kural.tamilMeaning}</p>
+            : <div className="flex flex-col gap-1.5">
+                <p className="text-brand-300 text-[11px] tracking-wide">{kural.transliteration}</p>
+                <p className="text-brand-100 text-sm leading-relaxed italic">"{kural.english}"</p>
+              </div>
+          }
         </div>
       )}
     </div>
