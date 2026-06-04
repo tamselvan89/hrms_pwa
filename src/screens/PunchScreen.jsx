@@ -9,6 +9,7 @@ import { computeWorked, findTodayRecord } from '../utils/attendance.js'
 import { formatDuration, formatDisplayDate } from '../utils/date.js'
 import { getTodaysKural } from '../data/thirukkural.js'
 import { useSpeech } from '../hooks/useSpeech.js'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog.jsx'
 import {
   OFFICE_LAT, OFFICE_LNG, GEOFENCE_RADIUS_M, distanceMeters,
 } from '../config.js'
@@ -43,6 +44,7 @@ export function PunchScreen({ onOpenProfile }) {
   const [now, setNow] = useState(Date.now())
   const [isLoading, setIsLoading] = useState(true)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const menuRef = useRef(null)
   const lastPunchedAction = useRef(null)
 
@@ -192,7 +194,7 @@ export function PunchScreen({ onOpenProfile }) {
                   </>
                 )}
                 <div className="h-px bg-gray-100 mx-3" />
-                <button onClick={() => { setMenuOpen(false); logout() }}
+                <button onClick={() => { setMenuOpen(false); setShowLogoutConfirm(true) }}
                   className="w-full text-left px-4 py-3 text-sm text-rose-500 font-medium active:bg-rose-50">Logout</button>
               </div>
             )}
@@ -294,6 +296,21 @@ export function PunchScreen({ onOpenProfile }) {
 
         <div className="h-2 flex-shrink-0" />
       </div>
+
+      {/* Logout confirm dialog */}
+      {showLogoutConfirm && (
+        <ConfirmDialog
+          title="Logout"
+          message={isPunchedIn
+            ? "You're currently punched in. Are you sure you want to logout?"
+            : "Are you sure you want to logout?"}
+          confirmLabel="Yes, Logout"
+          cancelLabel="Cancel"
+          danger
+          onConfirm={() => { setShowLogoutConfirm(false); logout() }}
+          onCancel={() => setShowLogoutConfirm(false)}
+        />
+      )}
 
       {/* ── PUNCH PANEL — compact, pinned at bottom ── */}
       <div className="flex-shrink-0 bg-white border-t border-gray-100 px-4 pt-3 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">

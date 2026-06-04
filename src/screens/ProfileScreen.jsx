@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog.jsx'
 
 function Field({ label, value }) {
   if (!value) return null
@@ -21,6 +23,7 @@ function Section({ title, children }) {
 
 export function ProfileScreen({ onBack }) {
   const { profile, logout } = useAuth()
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const fullName = [profile?.firstname, profile?.lastname].filter(Boolean).join(' ')
   const initials = [profile?.firstname?.[0], profile?.lastname?.[0]].filter(Boolean).join('').toUpperCase()
 
@@ -75,7 +78,7 @@ export function ProfileScreen({ onBack }) {
           </Section>
 
           <button
-            onClick={logout}
+            onClick={() => setShowLogoutConfirm(true)}
             className="w-full rounded-2xl bg-rose-50 border border-rose-100 text-rose-500 font-semibold text-sm py-4 flex items-center justify-center gap-2 active:bg-rose-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -83,6 +86,18 @@ export function ProfileScreen({ onBack }) {
             </svg>
             Logout
           </button>
+
+          {showLogoutConfirm && (
+            <ConfirmDialog
+              title="Logout"
+              message="Are you sure you want to logout?"
+              confirmLabel="Yes, Logout"
+              cancelLabel="Cancel"
+              danger
+              onConfirm={() => { setShowLogoutConfirm(false); logout() }}
+              onCancel={() => setShowLogoutConfirm(false)}
+            />
+          )}
         </div>
       </div>
     </div>
