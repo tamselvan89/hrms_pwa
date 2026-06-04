@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  input, button, select, textarea {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+/* ── Flip clock ───────────────────────────────────────────────────────────── */
+
+/* Digit flips in from below when it changes */
+@keyframes flipDigit {
+  0%   { opacity: 0; transform: translateY(40%) scaleY(0.6); }
+  60%  { opacity: 1; transform: translateY(-6%) scaleY(1.04); }
+  100% { opacity: 1; transform: translateY(0)   scaleY(1); }
+}
+
+.animate-flip-digit { animation: flipDigit 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+
+/* ── Punch button animations ──────────────────────────────────────────────── */
+
+/* Ripple burst on tap */
+@keyframes ripple {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* Expanding ring while locating */
+@keyframes sonar {
+  0%   { transform: scale(1);   opacity: 0.6; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* Success: quick bounce scale */
+@keyframes pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.13); }
+  70%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+/* Checkmark stroke draw */
+@keyframes drawCheck {
+  from { stroke-dashoffset: 50; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Fade-slide up for label text */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-ripple  { animation: ripple 0.6s ease-out forwards; }
+.animate-sonar   { animation: sonar  1.4s ease-out infinite; }
+.animate-pop     { animation: pop    0.45s cubic-bezier(.36,.07,.19,.97) forwards; }
+.animate-slide-up{ animation: slideUp 0.25s ease-out forwards; }
+.draw-check path { stroke-dasharray: 50; stroke-dashoffset: 50; animation: drawCheck 0.4s 0.1s ease-out forwards; }
+
+@layer utilities {
+  /* fallback first, then dvh overrides it in browsers that support it */
+  .h-screen-safe {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .scroll-area {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}

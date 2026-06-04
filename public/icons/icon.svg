@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="100" fill="#16a34a"/>
+
+  <!-- Outer circle of @ symbol -->
+  <circle cx="210" cy="272" r="120" fill="none" stroke="white" stroke-width="34"/>
+
+  <!-- Inner circle of @ symbol -->
+  <circle cx="210" cy="272" r="52" fill="white"/>
+
+  <!-- Tail of @ curving right -->
+  <path d="M330 272 Q340 170 290 150" fill="none" stroke="white" stroke-width="34" stroke-linecap="round"/>
+
+  <!-- Leaf 1 - top right -->
+  <ellipse cx="360" cy="140" rx="38" ry="20" fill="#86efac" transform="rotate(-40 360 140)"/>
+  <!-- Leaf 1 vein -->
+  <line x1="337" y1="158" x2="383" y2="122" stroke="#16a34a" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Leaf 2 - mid right -->
+  <ellipse cx="400" cy="195" rx="36" ry="18" fill="#4ade80" transform="rotate(-20 400 195)"/>
+  <!-- Leaf 2 vein -->
+  <line x1="376" y1="205" x2="424" y2="185" stroke="#16a34a" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Leaf 3 - bottom right (larger) -->
+  <ellipse cx="370" cy="255" rx="42" ry="20" fill="#86efac" transform="rotate(10 370 255)"/>
+  <!-- Leaf 3 vein -->
+  <line x1="344" y1="252" x2="396" y2="258" stroke="#16a34a" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Stem connecting leaves -->
+  <path d="M345 158 Q365 200 358 260" fill="none" stroke="#bbf7d0" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Yellow/gold seed/bud at top of stem -->
+  <ellipse cx="340" cy="148" rx="16" ry="22" fill="#ca8a04" transform="rotate(-30 340 148)"/>
+  <ellipse cx="340" cy="148" rx="10" ry="15" fill="#eab308" transform="rotate(-30 340 148)"/>
+</svg>
