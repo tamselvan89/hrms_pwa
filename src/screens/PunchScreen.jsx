@@ -8,6 +8,7 @@ import { getAttendance, postAttendance } from '../api/client.js'
 import { computeWorked, findTodayRecord } from '../utils/attendance.js'
 import { formatDuration, formatDisplayDate } from '../utils/date.js'
 import { getTodaysKural } from '../data/thirukkural.js'
+import { useSpeech } from '../hooks/useSpeech.js'
 import {
   OFFICE_LAT, OFFICE_LNG, GEOFENCE_RADIUS_M, distanceMeters,
 } from '../config.js'
@@ -438,9 +439,57 @@ function KuralCard() {
   const kural = getTodaysKural()
   const [expanded, setExpanded] = useState(false)
   const [lang, setLang] = useState('tamil')
+  const { isSupported, isSpeaking, isPaused, stop, toggle } = useSpeech()
+
+  // Stop speech when card collapses or lang switches
+  useEffect(() => { stop() }, [expanded, lang])
+
+  function getSpeechText() {
+    if (lang === 'tamil') {
+      return `திருக்குறள் ${kural.number}. ${kural.tamil}. பொருள்: ${kural.tamilMeaning}`
+    }
+    return `Thirukkural number ${kural.number}. ${kural.transliteration.replace('/', '.')}. Meaning: ${kural.english}`
+  }
+
+  function handleSpeak() {
+    const langCode = lang === 'tamil' ? 'ta-IN' : 'en-IN'
+    const rate = lang === 'tamil' ? 0.8 : 0.9
+    toggle(getSpeechText(), langCode, rate, 1)
+  }
+
+  // Speaker button icon
+  function SpeakerIcon() {
+    if (isSpeaking && !isPaused) {
+      // Animated sound waves — playing
+      return (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="white" stroke="white" />
+          <path d="M15.54 8.46a5 5 0 010 7.07" className="animate-pulse" />
+          <path d="M19.07 4.93a10 10 0 010 14.14" className="animate-pulse" style={{ animationDelay: '0.15s' }} />
+        </svg>
+      )
+    }
+    if (isPaused) {
+      // Paused — play icon
+      return (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="white" stroke="none">
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+      )
+    }
+    // Idle — speaker icon
+    return (
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="white" stroke="white" />
+        <path d="M15.54 8.46a5 5 0 010 7.07" />
+      </svg>
+    )
+  }
 
   return (
     <div className="bg-gradient-to-br from-brand-700 to-brand-900 rounded-2xl px-4 py-4 shadow-md">
+
+      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-lg">📖</span>
@@ -453,6 +502,7 @@ function KuralCard() {
         </span>
       </div>
 
+      {/* Tamil verse — tappable to expand */}
       <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
         <p className="text-white text-sm font-medium leading-relaxed whitespace-pre-line" style={{ fontFamily: 'serif' }}>
           {kural.tamil}
@@ -462,24 +512,65 @@ function KuralCard() {
         </p>
       </button>
 
+      {/* Expanded meaning */}
       {expanded && (
         <div className="mt-3 pt-3 border-t border-white/10 animate-slide-up">
-          <div className="flex bg-white/10 rounded-xl p-0.5 mb-3 w-fit">
-            {['tamil', 'english'].map(l => (
-              <button key={l} onClick={() => setLang(l)}
-                className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
-                  ${lang === l ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-300'}`}>
-                {l === 'tamil' ? 'தமிழ்' : 'English'}
-              </button>
-            ))}
+
+          {/* Controls: lang toggle + speak button */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex bg-white/10 rounded-xl p-0.5">
+              {['tamil', 'english'].map(l => (
+                <button key={l} onClick={() => setLang(l)}
+                  className={`px-3 py-1 rounded-[10px] text-xs font-semibold transition-all
+                    ${lang === l ? 'bg-white text-brand-700 shadow-sm' : 'text-brand-300'}`}>
+                  {l === 'tamil' ? 'தமிழ்' : 'English'}
+                </button>
+              ))}
+            </div>
+
+            {/* Speak / Pause / Stop */}
+            {isSupported && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSpeak}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all
+                    ${isSpeaking && !isPaused
+                      ? 'bg-amber-400 text-amber-900'
+                      : isPaused
+                        ? 'bg-brand-400 text-white'
+                        : 'bg-white/20 text-white hover:bg-white/30'
+                    }`}
+                >
+                  <SpeakerIcon />
+                  <span>{isSpeaking && !isPaused ? 'Pause' : isPaused ? 'Resume' : 'Listen'}</span>
+                </button>
+                {(isSpeaking || isPaused) && (
+                  <button onClick={stop}
+                    className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center text-brand-300">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="4" y="4" width="16" height="16" rx="2" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Meaning text — highlighted word-by-word feel via leading */}
           {lang === 'tamil'
             ? <p className="text-brand-100 text-sm leading-relaxed">{kural.tamilMeaning}</p>
             : <div className="flex flex-col gap-1.5">
-                <p className="text-brand-300 text-[11px] tracking-wide">{kural.transliteration}</p>
-                <p className="text-brand-100 text-sm leading-relaxed italic">"{kural.english}"</p>
+                <p className="text-brand-300 text-[11px] tracking-wide italic">{kural.transliteration}</p>
+                <p className="text-brand-100 text-sm leading-relaxed">"{kural.english}"</p>
               </div>
           }
+
+          {/* Voice availability note */}
+          {!isSupported && (
+            <p className="text-brand-500 text-[10px] mt-2">
+              🔇 Voice not supported on this browser
+            </p>
+          )}
         </div>
       )}
     </div>
